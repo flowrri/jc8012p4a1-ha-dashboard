@@ -36,6 +36,8 @@ A custom Home Assistant wall-panel dashboard for the **JC8012P4A1** board
 
 - ESP32-P4 main SoC + ESP32-C6 co-processor (Wi-Fi over SDIO via
   `esp32_hosted`)
+- Board: [JC8012P4A1 on AliExpress](https://de.aliexpress.com/item/1005009069281911.html)
+- 3D-printable stand: [Guition P4 10" Screen Stand on MakerWorld](https://makerworld.com/de/models/2490049-guition-p4-10inch-screen-stand#profileId-2736046)
 - `jd9365` MIPI-DSI display driver and `gsl3680` capacitive touch
   controller — vendored locally under `components/` and patched for
   current ESPHome versions, since upstream support for this exact panel

@@ -1,0 +1,167 @@
+# ============================================================================
+#  Home Assistant entities
+#  ---------------------------------------------------------------------------
+#  >>> ADAPT THE ENTITY IDs BELOW TO MATCH YOUR OWN HOME ASSISTANT SETUP <<<
+#  Everything else in this file references these substitutions, so changing
+#  the IDs here is all most users need to do.
+#
+#  NOTE: Hausstatus, Lichtszenen-Entitäten (scene_*), Luftfeuchtigkeit and
+#  WLAN Gäste are intentionally static/dummy placeholders per request — see
+#  dashboard.yaml. Everything else below is wired to real entities.
+# ============================================================================
+substitutions:
+  # --- Outdoor temperature + sunset ---------------------------------------
+  temp_outdoor_entity:    "sensor.current_outdoor_temperature_bt1_30002"
+  sunset_entity:          "sensor.sonnenuntergang_uhrzeit"
+
+  # --- Kitchen media (Küche) — three selectable radio stations -----------
+  kitchen_entity:         "media_player.volumio"
+  radio_1_name:           "N-JOY"
+  radio_1_script:         "script.radio_njoy"
+  radio_2_name:           "NDR 2"
+  radio_2_script:         "script.radio_ndr2"
+  radio_3_name:           "Hamburg"
+  radio_3_script:         "script.radio_hamburg"
+
+  # --- Trash calendar (Müllkalender) — 5 fractions, entity state = days left
+  trash_1_name:           "Gelber Sack"
+  trash_1_entity:         "sensor.muell_gelber_sack_tage"
+  trash_2_name:           "Restmüll"
+  trash_2_entity:         "sensor.muell_restmuell_tage"
+  trash_3_name:           "Bioabfall"
+  trash_3_entity:         "sensor.muell_bioabfall_tage"
+  trash_4_name:           "Papiermüll"
+  trash_4_entity:         "sensor.muell_papier_tage"
+  trash_5_name:           "Sperrmüll"
+  trash_5_entity:         "sensor.muell_sperrmuell_tage"
+
+  # --- Light scenes (momentary triggers, not stateful) --------------------
+  scene_1_name:           "Guten Morgen"
+  scene_1_entity:         "scene.guten_morgen"
+  scene_2_name:           "Abendessen"
+  scene_2_entity:         "scene.abendessen"
+  scene_3_name:           "Entspannen"
+  scene_3_entity:         "scene.entspannen"
+  scene_4_name:           "Verlassen"
+  scene_4_entity:         "scene.verlassen"
+
+  # --- Energy: consumption + solar generation ------------------------------
+  energy_today_entity:    "sensor.stromverbrauch_heute"
+  solar_entity:           "sensor.solar_inverter_daily_generation"
+
+# ----------------------------------------------------------------------------
+#  Text sensors (sunset time, kitchen now-playing title / artist, trash)
+# ----------------------------------------------------------------------------
+text_sensor:
+  - platform: homeassistant
+    entity_id: ${sunset_entity}
+    id: sunset_time
+    on_value:
+      - lvgl.label.update: {id: sunset_value, text: !lambda 'return x;'}
+
+  - platform: homeassistant
+    entity_id: ${kitchen_entity}
+    attribute: media_title
+    id: media_title_kitchen
+    on_value:
+      - lvgl.label.update: {id: media_title_label, text: !lambda 'return x.empty() ? std::string("—") : x;'}
+
+  - platform: homeassistant
+    entity_id: ${kitchen_entity}
+    attribute: media_artist
+    id: media_artist_kitchen
+    on_value:
+      - lvgl.label.update: {id: media_artist_label, text: !lambda 'return x;'}
+
+# ----------------------------------------------------------------------------
+#  Numeric sensors (outdoor temp, trash days, kitchen volume, energy, solar)
+# ----------------------------------------------------------------------------
+sensor:
+  - platform: homeassistant
+    entity_id: ${temp_outdoor_entity}
+    id: temp_outdoor
+    on_value:
+      - lvgl.label.update:
+          id: weather_temp_value
+          text: !lambda |-
+            if (std::isnan(x)) return std::string("--°C");
+            char b[16]; snprintf(b, sizeof(b), "%.1f°C", x); return std::string(b);
+
+  - platform: homeassistant
+    entity_id: ${kitchen_entity}
+    attribute: volume_level
+    id: volume_kitchen
+    on_value:
+      - lvgl.slider.update:
+          id: volume_slider
+          value: !lambda 'return x * 100;'
+
+  - platform: homeassistant
+    entity_id: ${energy_today_entity}
+    id: energy_today
+    on_value:
+      - lvgl.label.update:
+          id: energy_value
+          text: !lambda |-
+            if (std::isnan(x)) return std::string("-- kWh (Heute)");
+            char b[24]; snprintf(b, sizeof(b), "%.1f kWh (Heute)", x); return std::string(b);
+
+  - platform: homeassistant
+    entity_id: ${solar_entity}
+    id: solar_today
+    on_value:
+      - lvgl.label.update:
+          id: solar_value
+          text: !lambda |-
+            if (std::isnan(x)) return std::string("-- kWh (Heute)");
+            char b[24]; snprintf(b, sizeof(b), "%.1f kWh (Heute)", x); return std::string(b);
+
+  - platform: homeassistant
+    entity_id: ${trash_1_entity}
+    id: trash_1_days
+    on_value:
+      - lvgl.label.update:
+          id: trash_1_value
+          text: !lambda |-
+            if (std::isnan(x)) return std::string("--");
+            char b[16]; snprintf(b, sizeof(b), "In %.0f Tagen", x); return std::string(b);
+
+  - platform: homeassistant
+    entity_id: ${trash_2_entity}
+    id: trash_2_days
+    on_value:
+      - lvgl.label.update:
+          id: trash_2_value
+          text: !lambda |-
+            if (std::isnan(x)) return std::string("--");
+            char b[16]; snprintf(b, sizeof(b), "In %.0f Tagen", x); return std::string(b);
+
+  - platform: homeassistant
+    entity_id: ${trash_3_entity}
+    id: trash_3_days
+    on_value:
+      - lvgl.label.update:
+          id: trash_3_value
+          text: !lambda |-
+            if (std::isnan(x)) return std::string("--");
+            char b[16]; snprintf(b, sizeof(b), "In %.0f Tagen", x); return std::string(b);
+
+  - platform: homeassistant
+    entity_id: ${trash_4_entity}
+    id: trash_4_days
+    on_value:
+      - lvgl.label.update:
+          id: trash_4_value
+          text: !lambda |-
+            if (std::isnan(x)) return std::string("--");
+            char b[16]; snprintf(b, sizeof(b), "In %.0f Tagen", x); return std::string(b);
+
+  - platform: homeassistant
+    entity_id: ${trash_5_entity}
+    id: trash_5_days
+    on_value:
+      - lvgl.label.update:
+          id: trash_5_value
+          text: !lambda |-
+            if (std::isnan(x)) return std::string("--");
+            char b[16]; snprintf(b, sizeof(b), "In %.0f Tagen", x); return std::string(b);

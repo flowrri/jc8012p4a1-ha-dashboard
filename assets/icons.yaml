@@ -1,0 +1,110 @@
+# http://materialdesignicons.com/cdn/7.4.47/
+
+# Define icons used
+font:
+  - file: 'https://github.com/Templarian/MaterialDesign-Webfont/raw/v7.4.47/fonts/materialdesignicons-webfont.ttf'
+    id: icon_font
+    size: 48
+    bpp: 8
+    glyphs: &icon_glyphs [
+      "\U000F0335",  # mdi-lightbulb
+      "\U000F042B",  # mdi-printer-3d
+      "\U000F0D43",  # mdi-air-filter
+      "\U000F1051",  # mdi-led-strip-variant
+      "\U000F03D7",  # mdi-package-variant-closed
+      "\U000F07D6",  # mdi-led-strip
+      "\U000F00AC",  # mdi-blinds-closed
+      "\U000F1011",  # mdi-blinds-open
+      "\U000F1A4C",  # mdi-lightbulb-night
+      "\U000F1087",  # mdi-router-network
+      "\U000F036B",  # mdi-message-video
+      "\U000F0614",  # mdi-application-outline
+      "\U000F089E",  # mdi-battery
+      "\U000F07DE",  # mdi-filament
+      "\U000F0317",  # mdi-lan
+      "\U000F040A",  # mdi-play
+      "\U000F03E4",  # mdi-pause
+      "\U000F04AD",  # mdi-skip-next
+      "\U000F04AE",  # mdi-skip-previous
+      "\U000F04C7",  # mdi-spotify
+      "\U000F04B9",  # mdi-sofa
+      "\U000F02E5",  # mdi-pot
+      "\U000F06E8",  # mdi-lightbulb-on
+      "\U000F0417",  # mdi-radio
+      "\U000F04DB",  # mdi-stop
+      "\U000F050F",  # mdi-thermometer
+      "\U000F057E",  # mdi-volume-high
+      # Weather / house-status / trash / energy icons added for the redesign.
+      # NOTE: a few of these codepoints are best-effort (not re-verified against
+      # the live MDI 7.4.47 font) — if one renders blank, swap the codepoint.
+      "\U000F0599",  # mdi-weather-sunny
+      "\U000F0595",  # mdi-weather-partly-cloudy
+      "\U000F0590",  # mdi-weather-cloudy
+      "\U000F0596",  # mdi-weather-pouring
+      "\U000F0593",  # mdi-weather-lightning
+      "\U000F0598",  # mdi-weather-snowy
+      "\U000F0591",  # mdi-weather-fog
+      "\U000F0594",  # mdi-weather-night
+      "\U000F058E",  # mdi-water-percent (humidity)
+      "\U000F0F03",  # mdi-weather-sunset-down
+      "\U000F0238",  # mdi-flash (energy)
+      "\U000F05A9",  # mdi-wifi
+      "\U000F0A79",  # mdi-trash-can (Restmüll)
+      "\U000F064E",  # mdi-recycle (Gelber Sack)
+      "\U000F0313",  # mdi-leaf (Bioabfall)
+      "\U000F0D18",  # mdi-solar-power (Solarleistung)
+      ]
+
+  # Smaller variant of the same glyph set for compact UI elements (chips, controls)
+  - file: 'https://github.com/Templarian/MaterialDesign-Webfont/raw/v7.4.47/fonts/materialdesignicons-webfont.ttf'
+    id: icon_font_small
+    size: 26
+    bpp: 8
+    glyphs: *icon_glyphs
+
+# Map icons to names
+substitutions:
+  lightbulb:      "\U000F0335"
+  lightbulb_on:   "\U000F06E8"
+  printer:        "\U000F042B"
+  aircon:         "\U000F0D43"
+  ledstrip:       "\U000F1051"
+  led_strip_variant: "\U000F1051"
+  package:        "\U000F03D7"
+  lights:         "\U000F07D6"
+  blinds_closed:  "\U000F00AC"
+  blinds_open:    "\U000F1011"
+  nightlight:     "\U000F1A4C"
+  network:        "\U000F1087"
+  videocall:      "\U000F036B"
+  application:    "\U000F0614"
+  battery:        "\U000F089E"
+  filament:       "\U000F07DE"
+  lan:            "\U000F0317"
+  play:           "\U000F040A"
+  pause:          "\U000F03E4"
+  skip_next:      "\U000F04AD"
+  skip_previous:  "\U000F04AE"
+  spotify:        "\U000F04C7"
+  sofa:           "\U000F04B9"
+  pot:            "\U000F02E5"
+  radio:          "\U000F0417"
+  stop:           "\U000F04DB"
+  thermometer:    "\U000F050F"
+  volume:         "\U000F057E"
+  weather_sunny:        "\U000F0599"
+  weather_partly_cloudy: "\U000F0595"
+  weather_cloudy:       "\U000F0590"
+  weather_pouring:      "\U000F0596"
+  weather_lightning:    "\U000F0593"
+  weather_snowy:        "\U000F0598"
+  weather_fog:          "\U000F0591"
+  weather_night:        "\U000F0594"
+  humidity:             "\U000F058E"
+  sunset:               "\U000F0F03"
+  flash:                "\U000F0238"
+  wifi:                 "\U000F05A9"
+  trash_can:            "\U000F0A79"
+  recycle:              "\U000F064E"
+  leaf:                 "\U000F0313"
+  solar_power:          "\U000F0D18"

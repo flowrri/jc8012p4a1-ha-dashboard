@@ -1,0 +1,109 @@
+substitutions:
+  icon_font: icon_font
+
+  # Light iOS-card palette -----------------------------------------------------
+  page_bg_top:      "0xF3F1EA"   # background gradient (top) - warm off-white
+  page_bg_bottom:   "0xE4E9E2"   # background gradient (bottom) - pale sage
+
+  card_bg_color:    "0xFFFFFF"
+  card_border_color: "0xE7E5DE"
+
+  accent_color:     "0x0A84FF"   # iOS blue
+  accent_green:     "0x34C759"   # iOS green
+  accent_yellow:    "0xFFCC00"   # iOS yellow (Gelber Sack)
+  accent_orange:    "0xFF9500"   # iOS orange
+  accent_red:       "0xFF3B30"   # iOS red
+  accent_gray:      "0x8E8E93"   # Restmüll
+  spotify_color:    "0x1ED760"
+
+  text_primary:     "0x1C1C1E"
+  text_secondary:   "0x6E6E73"
+
+  card_radius: 26px
+  control_radius: 16px
+
+lvgl:
+  style_definitions:
+    # White card panel with a soft border (stands in for a drop shadow, which
+    # is comparatively expensive to render on every redraw).
+    - id: glass
+      bg_color: $card_bg_color
+      bg_opa: COVER
+      radius: $card_radius
+      border_width: 1
+      border_color: $card_border_color
+      border_opa: 100%
+      pad_all: 16
+      shadow_width: 0
+      scrollbar_mode: "OFF"
+
+    # Smaller card / chip variant
+    - id: glass_chip
+      bg_color: $card_bg_color
+      bg_opa: COVER
+      radius: 20px
+      scrollbar_mode: "OFF"
+      border_width: 1
+      border_color: $card_border_color
+      border_opa: 100%
+      pad_all: 14
+      shadow_width: 0
+
+    - id: transparent_row
+      bg_opa: TRANSP
+      border_width: 0
+      pad_all: 0
+      scrollbar_mode: "OFF"
+
+  theme:
+    button:
+      text_font: label_font
+      scroll_on_focus: false
+      radius: $control_radius
+      shadow_width: 0
+      border_width: 1
+      border_color: $card_border_color
+      border_opa: 100%
+      bg_color: "0xF2F2F5"
+      bg_opa: COVER
+      text_color: $text_primary
+      pressed:
+        bg_color: "0xE4E4E8"
+      checked:
+        bg_color: $accent_color
+        bg_opa: 100%
+        border_opa: 0%
+        text_color: "0xFFFFFF"
+
+    switch:
+      width: 64
+      height: 36
+      radius: 999
+      bg_color: "0xE4E4E8"
+      border_width: 0
+      knob:
+        bg_color: "0xFFFFFF"
+        pad_all: 2
+      checked:
+        bg_color: $accent_green
+
+    slider:
+      bg_color: "0xE4E4E8"
+      radius: 999
+      indicator:
+        bg_color: $accent_color
+        radius: 999
+      knob:
+        bg_color: "0xFFFFFF"
+        radius: 999
+        pad_all: 6   # bigger knob -> easier to grab/drag
+
+    arc:
+      arc_width: 10
+      arc_color: "0xE4E4E8"
+      indicator:
+        arc_width: 10
+        arc_color: $accent_color
+      knob:
+        bg_color: "0xFFFFFF"
+        pad_all: 2

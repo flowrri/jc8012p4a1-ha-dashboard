@@ -1,0 +1,804 @@
+###############################################################################
+#  JC8012P4A1 (ESP32-P4, 10.1" 800x1280) — Home Assistant dashboard
+#  Light "iOS card" redesign. Hausstatus, the live-camera reference, and the
+#  album-cover image are intentionally static placeholders (no HA bindings) —
+#  everything else (weather, trash calendar, kitchen radio, scenes, energy)
+#  is wired to real entities defined in entities.yaml.
+#
+#  File layout:
+#    dashboard.yaml   – this file (hardware + UI)
+#    secrets.yaml     – Wi-Fi / IP / OTA credentials
+#    entities.yaml    – Home Assistant entity bindings (adapt to your setup)
+#    assets/, theme/  – fonts, icons and the visual style
+###############################################################################
+
+substitutions:
+  name: "p4skeleton"            # keep stable so the HA integration is preserved
+  friendly_name: "P4 Display"
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  platformio_options:
+    board_build.flash_mode: dio
+  on_boot:
+    - priority: -100
+      then:
+        - light.turn_on: display_backlight
+        - lvgl.resume:
+        - lvgl.widget.redraw:
+        - lambda: 'id(last_touch_ms) = millis();'
+
+# Own screensaver timer, independent of LVGL's built-in idle tracking (which
+# proved unreliable) — driven purely by real touch events.
+globals:
+  - id: last_touch_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+interval:
+  - interval: 10s
+    then:
+      - if:
+          condition:
+            and:
+              - lvgl.page.is_showing: main_page
+              - lambda: 'return (millis() - id(last_touch_ms)) > 600000;'  # 10 min
+          then:
+            - lvgl.page.show: screensaver_page
+            - light.turn_on:
+                id: display_backlight
+                brightness: 15%
+                transition_length: 600ms
+
+esp32:
+  variant: ESP32P4
+  flash_size: 16MB
+  cpu_frequency: 360MHz
+  engineering_sample: true
+  framework:
+    type: esp-idf
+    advanced:
+      enable_idf_experimental_features: true
+
+logger:
+  level: DEBUG
+
+# Display driver + touch controller (local, patched for current ESPHome)
+external_components:
+  - source: components
+    components: [gsl3680, jd9365]
+
+# Secondary ESP32-C6 co-processor providing Wi-Fi over SDIO
+esp32_hosted:
+  variant: esp32c6
+  reset_pin: GPIO54
+  cmd_pin: GPIO19
+  clk_pin: GPIO18
+  d0_pin: GPIO14
+  d1_pin: GPIO15
+  d2_pin: GPIO16
+  d3_pin: GPIO17
+  active_high: true
+  use_psram: true   # move esp_hosted mempool to PSRAM -> frees internal RAM
+                    # (fixes the boot-time cache/stack assert on this P4 + LVGL UI)
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  manual_ip:
+    static_ip: !secret ip_address
+    gateway: !secret gateway
+    subnet: !secret subnet
+
+api:
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+# DSI PHY power rail
+esp_ldo:
+  - channel: 3
+    id: dsi_phy_enable
+    voltage: 2.5V
+    adjustable: True
+
+# Video memory
+psram:
+  mode: hex
+  speed: 200MHz
+
+# Clock for the status-bar time label (time comes from Home Assistant)
+time:
+  - platform: homeassistant
+    id: ha_time
+    on_time_sync:
+      - then: &update_clock
+          - lvgl.label.update:
+              id: display_time
+              text: !lambda |-
+                char b[6];
+                auto t = id(ha_time).now();
+                if (!t.is_valid()) return std::string("--:--");
+                snprintf(b, sizeof(b), "%02d:%02d", t.hour, t.minute);
+                return std::string(b);
+          - lvgl.label.update:
+              id: display_date
+              text: !lambda |-
+                static const char *wd[] = {"Sonntag", "Montag", "Dienstag", "Mittwoch",
+                                           "Donnerstag", "Freitag", "Samstag"};
+                static const char *mo[] = {"Januar", "Februar", "März", "April", "Mai", "Juni",
+                                           "Juli", "August", "September", "Oktober", "November", "Dezember"};
+                auto t = id(ha_time).now();
+                if (!t.is_valid()) return std::string("");
+                char b[48];
+                snprintf(b, sizeof(b), "%s, %02d. %s", wd[t.day_of_week - 1], t.day_of_month, mo[t.month - 1]);
+                return std::string(b);
+          - lvgl.label.update:
+              id: display_time_ss
+              text: !lambda |-
+                char b[6];
+                auto t = id(ha_time).now();
+                if (!t.is_valid()) return std::string("--:--");
+                snprintf(b, sizeof(b), "%02d:%02d", t.hour, t.minute);
+                return std::string(b);
+    on_time:
+      - seconds: 0
+        minutes: /1
+        then: *update_clock
+
+# --- Backlight ---------------------------------------------------------------
+output:
+  - id: backlight_output
+    platform: ledc
+    pin: GPIO23
+
+light:
+  - platform: monochromatic
+    output: backlight_output
+    name: "Backlight"
+    id: display_backlight
+    restore_mode: ALWAYS_ON
+    default_transition_length: 0s
+    gamma_correct: 1.0
+
+# Required so the jd9365 component (which includes switch.h) compiles
+switch:
+  - platform: template
+    id: panel_power
+    internal: true
+    optimistic: true
+    restore_mode: ALWAYS_ON
+    turn_on_action: []
+    turn_off_action: []
+
+# --- Touch -------------------------------------------------------------------
+i2c:
+  - id: i2c_bus_a
+    sda: GPIO7
+    scl: GPIO8
+    scan: true
+    frequency: 400kHz
+
+touchscreen:
+  - platform: gsl3680
+    id: my_touchscreen
+    reset_pin: GPIO22
+    interrupt_pin: GPIO21
+    # Native-frame transform; ESPHome-LVGL applies the 90° rotation on top.
+    # Verified by corner-tap calibration.
+    transform:
+      swap_xy: false
+      mirror_x: true
+      mirror_y: false
+    on_touch:
+      - lambda: 'id(last_touch_ms) = millis();'
+      - if:
+          condition:
+            lvgl.page.is_showing: screensaver_page
+          then:
+            - lvgl.page.show: main_page
+            - light.turn_on:
+                id: display_backlight
+                brightness: 100%
+                transition_length: 300ms
+
+# --- Display -----------------------------------------------------------------
+display:
+  - platform: jd9365
+    reset_pin: GPIO27
+    update_interval: 17ms
+    id: my_display
+    auto_clear_enabled: false
+
+# --- Diagnostic entities exposed to Home Assistant ---------------------------
+sensor:
+  - platform: uptime
+    name: "Uptime"
+    entity_category: diagnostic
+  - platform: wifi_signal
+    name: "Wi-Fi Signal"
+    update_interval: 60s
+    entity_category: diagnostic
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: "IP Address"
+      entity_category: diagnostic
+
+button:
+  - platform: restart
+    name: "Restart"
+    entity_category: diagnostic
+
+###############################################################################
+#  Assets / theme / Home Assistant entity bindings
+###############################################################################
+packages:
+  fonts:    !include assets/fonts.yaml
+  icons:    !include assets/icons.yaml
+  button:   !include theme/button.yaml
+  entities: !include entities.yaml
+
+###############################################################################
+#  LVGL — light "iOS card" dashboard (landscape 1280 x 800, rotation 90)
+###############################################################################
+lvgl:
+  buffer_size: 100%
+  byte_order: little_endian
+  rotation: 90
+  displays: my_display
+  touchscreens: my_touchscreen
+
+  pages:
+    - id: screensaver_page
+      width: 100%
+      height: 100%
+      bg_color: "0x000000"
+      bg_opa: COVER
+      layout: {type: flex, flex_flow: COLUMN, flex_align_main: CENTER, flex_align_cross: CENTER}
+      widgets:
+        - label:
+            id: display_time_ss
+            text: "--:--"
+            text_font: clock_huge
+            text_color: "0x8E8E93"
+            text_align: CENTER
+            width: 100%
+            align: CENTER
+
+    - id: main_page
+      width: 100%
+      height: 100%
+      bg_color: $page_bg_top
+      bg_grad_color: $page_bg_bottom
+      bg_grad_dir: VER
+      bg_opa: COVER
+      pad_all: 18
+      layout: {type: flex, flex_flow: COLUMN, pad_row: 14}
+      widgets:
+
+        # ================= Row A: Clock card + Weather card =================
+        - obj:
+            styles: transparent_row
+            scrollbar_mode: "OFF"
+            width: 100%
+            height: 138
+            layout: {type: flex, flex_flow: ROW, pad_column: 14}
+            widgets:
+
+              # ---------- Clock card ----------
+              - obj:
+                  styles: glass
+                  scrollbar_mode: "OFF"
+                  flex_grow: 1
+                  height: 100%
+                  layout: {type: flex, flex_flow: COLUMN, flex_align_main: CENTER, flex_align_cross: START}
+                  widgets:
+                    - label: {id: display_time, text: "--:--", text_font: clock_card_font, text_color: $text_primary}
+                    - label: {id: display_date, text: "", text_font: subtitle_font, text_color: $text_secondary}
+
+              # ---------- Weather card ----------
+              - obj:
+                  styles: glass_chip
+                  scrollbar_mode: "OFF"
+                  flex_grow: 2
+                  height: 100%
+                  layout: {type: flex, flex_flow: ROW, flex_align_main: CENTER, flex_align_cross: CENTER, pad_column: 20}
+                  widgets:
+                    - label: {text_font: icon_font, text: $weather_partly_cloudy, text_color: $text_secondary}
+                    - obj:
+                        styles: transparent_row
+                        scrollbar_mode: "OFF"
+                        width: SIZE_CONTENT
+                        height: SIZE_CONTENT
+                        layout: {type: flex, flex_flow: COLUMN}
+                        widgets:
+                          - label: {id: weather_temp_value, text: "--°C", text_font: title_font, text_color: $text_primary}
+                          - label: {text: "Außen", text_font: subtitle_font, text_color: $text_secondary}
+                    - obj:
+                        styles: transparent_row
+                        scrollbar_mode: "OFF"
+                        width: SIZE_CONTENT
+                        height: SIZE_CONTENT
+                        layout: {type: flex, flex_flow: ROW, pad_column: 6, flex_align_cross: CENTER}
+                        widgets:
+                          - label: {text_font: icon_font_small, text: $humidity, text_color: $accent_color}
+                          - obj:
+                              styles: transparent_row
+                              scrollbar_mode: "OFF"
+                              width: SIZE_CONTENT
+                              height: SIZE_CONTENT
+                              layout: {type: flex, flex_flow: COLUMN}
+                              widgets:
+                                # Dummy placeholder — not wired to any entity.
+                                - label: {text: "45%", text_font: label_font, text_color: $text_primary}
+                                - label: {text: "Luftfeuchtigkeit", text_font: subtitle_font, text_color: $text_secondary}
+                    - obj:
+                        styles: transparent_row
+                        scrollbar_mode: "OFF"
+                        width: SIZE_CONTENT
+                        height: SIZE_CONTENT
+                        layout: {type: flex, flex_flow: ROW, pad_column: 6, flex_align_cross: CENTER}
+                        widgets:
+                          - label: {text_font: icon_font_small, text: $sunset, text_color: $accent_orange}
+                          - obj:
+                              styles: transparent_row
+                              scrollbar_mode: "OFF"
+                              width: SIZE_CONTENT
+                              height: SIZE_CONTENT
+                              layout: {type: flex, flex_flow: COLUMN}
+                              widgets:
+                                - label: {id: sunset_value, text: "--:--", text_font: label_font, text_color: $text_primary}
+                                - label: {text: "Sonnenuntergang", text_font: subtitle_font, text_color: $text_secondary}
+
+        # ================= Row B: 3 columns =================
+        - obj:
+            styles: transparent_row
+            scrollbar_mode: "OFF"
+            width: 100%
+            flex_grow: 1
+            layout: {type: flex, flex_flow: ROW, pad_column: 14}
+            widgets:
+
+              # ---------- Column 1: Hausstatus (static) + Müllkalender ----------
+              - obj:
+                  styles: transparent_row
+                  scrollbar_mode: "OFF"
+                  flex_grow: 2
+                  height: 100%
+                  layout: {type: flex, flex_flow: COLUMN, pad_row: 14}
+                  widgets:
+
+                    # Hausstatus — static placeholder, no entity bindings
+                    - obj:
+                        styles: glass
+                        scrollbar_mode: "OFF"
+                        width: 100%
+                        height: 140
+                        layout: {type: flex, flex_flow: COLUMN, pad_row: 8}
+                        widgets:
+                          - label: {text: "Hausstatus", text_font: heading_font, text_color: $text_primary}
+                          - obj:
+                              styles: transparent_row
+                              scrollbar_mode: "OFF"
+                              width: 100%
+                              height: SIZE_CONTENT
+                              layout: {type: flex, flex_flow: ROW, flex_align_main: SPACE_BETWEEN}
+                              widgets:
+                                - label: {text: "Alle Fenster", text_font: label_font, text_color: $text_primary}
+                                - label: {text: "OK", text_font: label_font, text_color: $accent_green}
+                          - obj:
+                              styles: transparent_row
+                              scrollbar_mode: "OFF"
+                              width: 100%
+                              height: SIZE_CONTENT
+                              layout: {type: flex, flex_flow: ROW, flex_align_main: SPACE_BETWEEN}
+                              widgets:
+                                - label: {text: "Kamera", text_font: label_font, text_color: $text_primary}
+                                - label: {text: "Wohnzimmer", text_font: label_font, text_color: $text_secondary}
+
+                    # Müllkalender — real entities (entities.yaml)
+                    - obj:
+                        styles: glass
+                        scrollbar_mode: "OFF"
+                        width: 100%
+                        flex_grow: 1
+                        layout: {type: flex, flex_flow: COLUMN, pad_row: 12}
+                        widgets:
+                          - label: {text: "Müllkalender", text_font: heading_font, text_color: $text_primary}
+                          - obj:
+                              styles: transparent_row
+                              scrollbar_mode: "OFF"
+                              width: 100%
+                              height: SIZE_CONTENT
+                              layout: {type: flex, flex_flow: ROW, pad_column: 10, flex_align_cross: CENTER}
+                              widgets:
+                                - obj:
+                                    scrollbar_mode: "OFF"
+                                    width: 28
+                                    height: 28
+                                    radius: 999
+                                    bg_color: $accent_yellow
+                                    bg_opa: COVER
+                                    border_width: 0
+                                    widgets:
+                                      - label: {align: CENTER, text_font: icon_font_small, text: $recycle, text_color: "0xFFFFFF"}
+                                - label: {text: "${trash_1_name}", flex_grow: 1, text_font: label_font, text_color: $text_primary}
+                                - label: {id: trash_1_value, text: "--", text_font: subtitle_font, text_color: $text_secondary}
+                          - obj:
+                              styles: transparent_row
+                              scrollbar_mode: "OFF"
+                              width: 100%
+                              height: SIZE_CONTENT
+                              layout: {type: flex, flex_flow: ROW, pad_column: 10, flex_align_cross: CENTER}
+                              widgets:
+                                - obj:
+                                    scrollbar_mode: "OFF"
+                                    width: 28
+                                    height: 28
+                                    radius: 999
+                                    bg_color: $accent_gray
+                                    bg_opa: COVER
+                                    border_width: 0
+                                    widgets:
+                                      - label: {align: CENTER, text_font: icon_font_small, text: $trash_can, text_color: "0xFFFFFF"}
+                                - label: {text: "${trash_2_name}", flex_grow: 1, text_font: label_font, text_color: $text_primary}
+                                - label: {id: trash_2_value, text: "--", text_font: subtitle_font, text_color: $text_secondary}
+                          - obj:
+                              styles: transparent_row
+                              scrollbar_mode: "OFF"
+                              width: 100%
+                              height: SIZE_CONTENT
+                              layout: {type: flex, flex_flow: ROW, pad_column: 10, flex_align_cross: CENTER}
+                              widgets:
+                                - obj:
+                                    scrollbar_mode: "OFF"
+                                    width: 28
+                                    height: 28
+                                    radius: 999
+                                    bg_color: $accent_green
+                                    bg_opa: COVER
+                                    border_width: 0
+                                    widgets:
+                                      - label: {align: CENTER, text_font: icon_font_small, text: $leaf, text_color: "0xFFFFFF"}
+                                - label: {text: "${trash_3_name}", flex_grow: 1, text_font: label_font, text_color: $text_primary}
+                                - label: {id: trash_3_value, text: "--", text_font: subtitle_font, text_color: $text_secondary}
+                          - obj:
+                              styles: transparent_row
+                              scrollbar_mode: "OFF"
+                              width: 100%
+                              height: SIZE_CONTENT
+                              layout: {type: flex, flex_flow: ROW, pad_column: 10, flex_align_cross: CENTER}
+                              widgets:
+                                - obj:
+                                    scrollbar_mode: "OFF"
+                                    width: 28
+                                    height: 28
+                                    radius: 999
+                                    bg_color: $accent_color
+                                    bg_opa: COVER
+                                    border_width: 0
+                                    widgets:
+                                      - label: {align: CENTER, text_font: icon_font_small, text: $package, text_color: "0xFFFFFF"}
+                                - label: {text: "${trash_4_name}", flex_grow: 1, text_font: label_font, text_color: $text_primary}
+                                - label: {id: trash_4_value, text: "--", text_font: subtitle_font, text_color: $text_secondary}
+                          - obj:
+                              styles: transparent_row
+                              scrollbar_mode: "OFF"
+                              width: 100%
+                              height: SIZE_CONTENT
+                              layout: {type: flex, flex_flow: ROW, pad_column: 10, flex_align_cross: CENTER}
+                              widgets:
+                                - obj:
+                                    scrollbar_mode: "OFF"
+                                    width: 28
+                                    height: 28
+                                    radius: 999
+                                    bg_color: $accent_orange
+                                    bg_opa: COVER
+                                    border_width: 0
+                                    widgets:
+                                      - label: {align: CENTER, text_font: icon_font_small, text: $sofa, text_color: "0xFFFFFF"}
+                                - label: {text: "${trash_5_name}", flex_grow: 1, text_font: label_font, text_color: $text_primary}
+                                - label: {id: trash_5_value, text: "--", text_font: subtitle_font, text_color: $text_secondary}
+
+              # ---------- Column 2: Küche media control ----------
+              - obj:
+                  styles: glass
+                  scrollbar_mode: "OFF"
+                  scrollable: false
+                  flex_grow: 3
+                  height: 100%
+                  layout: {type: flex, flex_flow: COLUMN, pad_row: 10}
+                  widgets:
+                    - label: {text: "Küche", text_font: heading_font, text_color: $text_primary}
+
+                    - obj:
+                        styles: transparent_row
+                        scrollbar_mode: "OFF"
+                        width: 100%
+                        height: 70
+                        layout: {type: flex, flex_flow: COLUMN, flex_align_main: CENTER}
+                        widgets:
+                          - label: {id: media_title_label, text: "—", text_font: title_font, text_color: $text_primary, width: 100%, long_mode: SCROLL_CIRCULAR}
+                          - label: {id: media_artist_label, text: "", text_font: subtitle_font, text_color: $text_secondary, width: 100%}
+
+                    # Transport controls
+                    - obj:
+                        styles: transparent_row
+                        scrollbar_mode: "OFF"
+                        width: 100%
+                        height: 64
+                        layout: {type: flex, flex_flow: ROW, flex_align_main: CENTER, flex_align_cross: CENTER, pad_column: 24}
+                        widgets:
+                          - button:
+                              id: prev_btn
+                              width: 52
+                              height: 52
+                              radius: 999
+                              pad_all: 0
+                              widgets:
+                                - label: {align: CENTER, text_font: icon_font_small, text: $skip_previous}
+                              on_press:
+                                - homeassistant.service:
+                                    service: media_player.media_previous_track
+                                    data: {entity_id: "${kitchen_entity}"}
+                          - button:
+                              id: play_pause_btn
+                              width: 64
+                              height: 64
+                              radius: 999
+                              pad_all: 0
+                              bg_color: $accent_color
+                              widgets:
+                                - label: {id: play_pause_icon, align: CENTER, text_font: icon_font, text: $play, text_color: "0xFFFFFF"}
+                              on_press:
+                                - homeassistant.service:
+                                    service: media_player.media_play_pause
+                                    data: {entity_id: "${kitchen_entity}"}
+                          - button:
+                              id: stop_btn
+                              width: 64
+                              height: 52
+                              radius: 999
+                              pad_all: 0
+                              widgets:
+                                - label: {align: CENTER, text: "Stop", text_font: label_font, text_color: $accent_red}
+                              on_press:
+                                - lvgl.label.update: {id: media_title_label, text: "—"}
+                                - lvgl.label.update: {id: media_artist_label, text: ""}
+                                - homeassistant.service:
+                                    service: media_player.media_stop
+                                    data: {entity_id: "${kitchen_entity}"}
+                          - button:
+                              id: next_btn
+                              width: 52
+                              height: 52
+                              radius: 999
+                              pad_all: 0
+                              widgets:
+                                - label: {align: CENTER, text_font: icon_font_small, text: $skip_next}
+                              on_press:
+                                - homeassistant.service:
+                                    service: media_player.media_next_track
+                                    data: {entity_id: "${kitchen_entity}"}
+
+                    - obj: {styles: transparent_row, scrollbar_mode: "OFF", width: 100%, flex_grow: 1}
+
+                    # Volume (slider) — large, easy-to-grab touch target
+                    - obj:
+                        styles: transparent_row
+                        scrollbar_mode: "OFF"
+                        scrollable: false
+                        width: 100%
+                        height: 52
+                        pad_bottom: 6
+                        layout: {type: flex, flex_flow: ROW, flex_align_cross: CENTER, pad_column: 14}
+                        widgets:
+                          - label: {text_font: icon_font_small, text: $volume, text_color: $text_secondary}
+                          - slider:
+                              id: volume_slider
+                              flex_grow: 1
+                              height: 36
+                              ext_click_area: 16
+                              min_value: 0
+                              max_value: 100
+                              value: 30
+                              on_release:
+                                - homeassistant.service:
+                                    service: media_player.volume_set
+                                    data: {entity_id: "${kitchen_entity}"}
+                                    data_template: {volume_level: "{{ vol }}"}
+                                    variables: {vol: !lambda 'return x / 100.0;'}
+
+                    # Radio station quick-select
+                    - label: {text: "Radiosender", text_font: subtitle_font, text_color: $text_secondary}
+                    - obj:
+                        styles: transparent_row
+                        scrollbar_mode: "OFF"
+                        width: 100%
+                        height: 52
+                        layout: {type: flex, flex_flow: ROW, pad_column: 10}
+                        widgets:
+                          - button:
+                              id: btn_radio_1
+                              flex_grow: 1
+                              height: 100%
+                              widgets:
+                                - label: {align: CENTER, text: "${radio_1_name}", text_font: label_font}
+                              on_press:
+                                - lvgl.label.update: {id: media_title_label, text: "${radio_1_name}"}
+                                - lvgl.label.update: {id: media_artist_label, text: "Live-Radio"}
+                                - homeassistant.service:
+                                    service: script.turn_on
+                                    data: {entity_id: "${radio_1_script}"}
+                          - button:
+                              id: btn_radio_2
+                              flex_grow: 1
+                              height: 100%
+                              widgets:
+                                - label: {align: CENTER, text: "${radio_2_name}", text_font: label_font}
+                              on_press:
+                                - lvgl.label.update: {id: media_title_label, text: "${radio_2_name}"}
+                                - lvgl.label.update: {id: media_artist_label, text: "Live-Radio"}
+                                - homeassistant.service:
+                                    service: script.turn_on
+                                    data: {entity_id: "${radio_2_script}"}
+                          - button:
+                              id: btn_radio_3
+                              flex_grow: 1
+                              height: 100%
+                              widgets:
+                                - label: {align: CENTER, text: "${radio_3_name}", text_font: label_font}
+                              on_press:
+                                - lvgl.label.update: {id: media_title_label, text: "${radio_3_name}"}
+                                - lvgl.label.update: {id: media_artist_label, text: "Live-Radio"}
+                                - homeassistant.service:
+                                    service: script.turn_on
+                                    data: {entity_id: "${radio_3_script}"}
+
+              # ---------- Column 3: Lichtszenen + Energie ----------
+              - obj:
+                  styles: transparent_row
+                  scrollbar_mode: "OFF"
+                  flex_grow: 2
+                  height: 100%
+                  layout: {type: flex, flex_flow: COLUMN, pad_row: 14}
+                  widgets:
+
+                    - obj:
+                        styles: glass
+                        scrollbar_mode: "OFF"
+                        width: 100%
+                        flex_grow: 3
+                        layout: {type: flex, flex_flow: COLUMN, pad_row: 6}
+                        widgets:
+                          - label: {text: "Lichtszenen", text_font: heading_font, text_color: $text_primary}
+                          - obj:
+                              styles: transparent_row
+                              scrollbar_mode: "OFF"
+                              width: 100%
+                              flex_grow: 1
+                              layout: {type: flex, flex_flow: ROW, flex_align_main: SPACE_BETWEEN, flex_align_cross: CENTER}
+                              widgets:
+                                - label: {text: "${scene_1_name}", text_font: label_font, text_color: $text_primary}
+                                - switch:
+                                    id: scene_1_switch
+                                    on_value:
+                                      - if:
+                                          condition:
+                                            lambda: 'return x;'
+                                          then:
+                                            - homeassistant.service:
+                                                service: scene.turn_on
+                                                data: {entity_id: "${scene_1_entity}"}
+                                            - delay: 400ms
+                                            - lvgl.widget.update: {id: scene_1_switch, state: {checked: false}}
+                          - obj:
+                              styles: transparent_row
+                              scrollbar_mode: "OFF"
+                              width: 100%
+                              flex_grow: 1
+                              layout: {type: flex, flex_flow: ROW, flex_align_main: SPACE_BETWEEN, flex_align_cross: CENTER}
+                              widgets:
+                                - label: {text: "${scene_2_name}", text_font: label_font, text_color: $text_primary}
+                                - switch:
+                                    id: scene_2_switch
+                                    on_value:
+                                      - if:
+                                          condition:
+                                            lambda: 'return x;'
+                                          then:
+                                            - homeassistant.service:
+                                                service: scene.turn_on
+                                                data: {entity_id: "${scene_2_entity}"}
+                                            - delay: 400ms
+                                            - lvgl.widget.update: {id: scene_2_switch, state: {checked: false}}
+                          - obj:
+                              styles: transparent_row
+                              scrollbar_mode: "OFF"
+                              width: 100%
+                              flex_grow: 1
+                              layout: {type: flex, flex_flow: ROW, flex_align_main: SPACE_BETWEEN, flex_align_cross: CENTER}
+                              widgets:
+                                - label: {text: "${scene_3_name}", text_font: label_font, text_color: $text_primary}
+                                - switch:
+                                    id: scene_3_switch
+                                    on_value:
+                                      - if:
+                                          condition:
+                                            lambda: 'return x;'
+                                          then:
+                                            - homeassistant.service:
+                                                service: scene.turn_on
+                                                data: {entity_id: "${scene_3_entity}"}
+                                            - delay: 400ms
+                                            - lvgl.widget.update: {id: scene_3_switch, state: {checked: false}}
+                          - obj:
+                              styles: transparent_row
+                              scrollbar_mode: "OFF"
+                              width: 100%
+                              flex_grow: 1
+                              layout: {type: flex, flex_flow: ROW, flex_align_main: SPACE_BETWEEN, flex_align_cross: CENTER}
+                              widgets:
+                                - label: {text: "${scene_4_name}", text_font: label_font, text_color: $text_primary}
+                                - switch:
+                                    id: scene_4_switch
+                                    on_value:
+                                      - if:
+                                          condition:
+                                            lambda: 'return x;'
+                                          then:
+                                            - homeassistant.service:
+                                                service: scene.turn_on
+                                                data: {entity_id: "${scene_4_entity}"}
+                                            - delay: 400ms
+                                            - lvgl.widget.update: {id: scene_4_switch, state: {checked: false}}
+
+                    - obj:
+                        styles: glass
+                        scrollbar_mode: "OFF"
+                        width: 100%
+                        flex_grow: 2
+                        layout: {type: flex, flex_flow: COLUMN, pad_row: 8}
+                        widgets:
+                          - label: {text: "Energie", text_font: heading_font, text_color: $text_primary}
+                          - obj:
+                              styles: transparent_row
+                              scrollbar_mode: "OFF"
+                              width: 100%
+                              height: SIZE_CONTENT
+                              layout: {type: flex, flex_flow: ROW, pad_column: 8, flex_align_cross: CENTER}
+                              widgets:
+                                - label: {text_font: icon_font_small, text: $flash, text_color: $accent_yellow}
+                                - obj:
+                                    styles: transparent_row
+                                    scrollbar_mode: "OFF"
+                                    flex_grow: 1
+                                    height: SIZE_CONTENT
+                                    layout: {type: flex, flex_flow: COLUMN}
+                                    widgets:
+                                      - label: {text: "Stromverbrauch", text_font: subtitle_font, text_color: $text_secondary}
+                                      - label: {id: energy_value, text: "-- kWh (Heute)", text_font: label_font, text_color: $text_primary}
+                          - obj:
+                              styles: transparent_row
+                              scrollbar_mode: "OFF"
+                              width: 100%
+                              height: SIZE_CONTENT
+                              layout: {type: flex, flex_flow: ROW, pad_column: 8, flex_align_cross: CENTER}
+                              pad_top: 6
+                              widgets:
+                                - label: {text_font: icon_font_small, text: $solar_power, text_color: $accent_orange}
+                                - obj:
+                                    styles: transparent_row
+                                    scrollbar_mode: "OFF"
+                                    flex_grow: 1
+                                    height: SIZE_CONTENT
+                                    layout: {type: flex, flex_flow: COLUMN}
+                                    widgets:
+                                      - label: {text: "Solarleistung", text_font: subtitle_font, text_color: $text_secondary}
+                                      - label: {id: solar_value, text: "-- kWh (Heute)", text_font: label_font, text_color: $text_primary}

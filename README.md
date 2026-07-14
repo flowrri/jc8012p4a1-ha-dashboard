@@ -8,6 +8,10 @@ A custom Home Assistant wall-panel dashboard for the **JC8012P4A1** board
 ![status](https://img.shields.io/badge/ESPHome-2026.6%2B-blue)
 ![board](https://img.shields.io/badge/board-JC8012P4A1%20(ESP32--P4)-informational)
 
+![Example rendering of the dashboard](docs/preview.png)
+
+*Illustrative example of the kind of result achievable with this project — not a 1:1 screenshot, exact layout/content will vary based on your `entities.yaml`.*
+
 ## Features
 
 - **Clock & weather** — large clock, outdoor temperature, humidity and

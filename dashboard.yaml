@@ -63,7 +63,9 @@ esp32:
       enable_idf_experimental_features: true
 
 logger:
-  level: DEBUG
+  level: WARN   # DEBUG was only needed for initial bring-up; verbose UART
+                # logging on every touch/render event was adding latency
+                # that could make touch input feel occasionally sluggish.
 
 # Display driver + touch controller (local, patched for current ESPHome)
 external_components:
@@ -91,6 +93,11 @@ wifi:
     static_ip: !secret ip_address
     gateway: !secret gateway
     subnet: !secret subnet
+  # Default WiFi modem sleep periodically stalls the main loop for tens of
+  # milliseconds while the radio wakes up — on a touch UI that shows up as
+  # intermittent unresponsive taps. Trades a little extra power draw
+  # (irrelevant on a mains-powered wall panel) for consistent latency.
+  power_save_mode: none
 
 api:
 

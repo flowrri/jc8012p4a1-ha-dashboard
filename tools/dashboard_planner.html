@@ -267,11 +267,15 @@
   <div class="toolbar">
     <h1>Dashboard-Layout-Planer</h1>
     <span class="subtitle">JC8012P4A1 · 1280 × 800 · Querformat</span>
+    <span class="subtitle" id="saveStatus" style="min-width:110px;">Gespeichert ✓</span>
     <div class="spacer"></div>
+    <button class="btn" id="undoBtn" title="Rückgängig (Strg/Cmd+Z)">↶ Rückgängig</button>
+    <button class="btn" id="redoBtn" title="Wiederherstellen (Strg/Cmd+Shift+Z)">↷ Wiederholen</button>
+    <button class="btn" id="snapBtn" title="Am 8px-Raster einrasten">Raster: Aus</button>
     <button class="btn" id="zoomOutBtn" title="Verkleinern">&minus;</button>
     <span class="subtitle" id="zoomLabel" style="min-width:38px; text-align:center;">65%</span>
     <button class="btn" id="zoomInBtn" title="Vergrößern">+</button>
-    <button class="btn" id="resetBtn">Zurücksetzen</button>
+    <button class="btn" id="resetBtn" title="Auf Standardlayout zurücksetzen (löscht auch den Autosave)">Zurücksetzen</button>
     <button class="btn primary" id="exportBtn">Layout exportieren</button>
   </div>
 
@@ -348,7 +352,7 @@
     </div>
   </div>
 
-  <div class="hint">Box ziehen zum Verschieben (Rand/Hintergrund anfassen) · Element anklicken zum Auswählen und frei innerhalb der Box zu platzieren · blauer Punkt zum Skalieren · Doppelklick auf Text zum direkten Bearbeiten · <kbd>Entf</kbd> zum Zurücksetzen der Auswahl · Export liefert eine YAML-Planungsdatei zur manuellen Übernahme ins echte dashboard.yaml.</div>
+  <div class="hint">Box ziehen zum Verschieben (Rand/Hintergrund anfassen) · Element anklicken zum Auswählen und frei innerhalb der Box zu platzieren · blauer Punkt zum Skalieren · Doppelklick auf Text zum direkten Bearbeiten · Pfeiltasten zum Feinjustieren der Auswahl (<kbd>Shift</kbd> = größere Schritte) · <kbd>Strg/Cmd+Z</kbd> Rückgängig, <kbd>Strg/Cmd+Umschalt+Z</kbd> Wiederholen · <kbd>Entf</kbd> zum Zurücksetzen der Auswahl · Dein Fortschritt wird automatisch im Browser gespeichert (bleibt beim Neuladen erhalten) · Export liefert eine YAML-Planungsdatei zur manuellen Übernahme ins echte dashboard.yaml.</div>
 </div>
 
 <div class="export-panel" id="exportPanel">
@@ -451,11 +455,48 @@
     ]}
   ];
 
-  var state = JSON.parse(JSON.stringify(DEFAULTS));
+  var STORAGE_KEY = "dashboard_planner_state_v1";
+  var GRID = 8;
+  var state = loadInitialState();
   var stage = document.getElementById("stage");
   var selBoxId = null, selElId = null; // selElId set -> element-level selection within selBoxId
   var zoom = 0.65;
   var elCounter = 1;
+  var snapEnabled = false;
+  var undoStack = [];
+  var redoStack = [];
+  var saveTimer = null;
+
+  function loadInitialState() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) return JSON.parse(raw);
+    } catch (e) { /* ignore corrupt/unavailable storage */ }
+    return JSON.parse(JSON.stringify(DEFAULTS));
+  }
+
+  function snap(v) { return snapEnabled ? Math.round(v / GRID) * GRID : v; }
+
+  // Call before mutating `state` so the change becomes undoable.
+  function pushHistory() {
+    undoStack.push(JSON.stringify(state));
+    if (undoStack.length > 100) undoStack.shift();
+    redoStack.length = 0;
+  }
+
+  function scheduleSave() {
+    var status = document.getElementById("saveStatus");
+    if (status) status.textContent = "Speichert …";
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(function () {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        if (status) status.textContent = "Gespeichert ✓";
+      } catch (e) {
+        if (status) status.textContent = "Speichern fehlgeschlagen";
+      }
+    }, 300);
+  }
 
   function findBox(id) { return state.find(function (b) { return b.id === id; }); }
   function findEl(box, id) { return box ? box.elements.find(function (e) { return e.id === id; }) : null; }
@@ -464,6 +505,9 @@
     stage.innerHTML = "";
     state.forEach(function (b) { stage.appendChild(buildBoxEl(b)); });
     renderInspector();
+    scheduleSave();
+    var undoBtn = document.getElementById("undoBtn"), redoBtn = document.getElementById("redoBtn");
+    if (undoBtn) { undoBtn.disabled = undoStack.length === 0; redoBtn.disabled = redoStack.length === 0; }
   }
 
   function buildBoxEl(b) {
@@ -532,7 +576,11 @@
     });
     function commit() {
       textEl.contentEditable = "false";
-      el.text = textEl.textContent.trim();
+      var newText = textEl.textContent.trim();
+      if (newText !== el.text) {
+        pushHistory();
+        el.text = newText;
+      }
       render();
       selectEl(b.id, el.id);
     }
@@ -548,13 +596,14 @@
       if (e.target === handle) return;
       if (e.target.closest(".el")) return;
       selectBox(b.id);
+      pushHistory();
       var startX = e.clientX, startY = e.clientY;
       var origX = b.x, origY = b.y;
       boxEl.setPointerCapture(e.pointerId);
       function onMove(ev) {
         var dx = (ev.clientX - startX) / zoom, dy = (ev.clientY - startY) / zoom;
-        b.x = Math.max(0, Math.round(origX + dx));
-        b.y = Math.max(0, Math.round(origY + dy));
+        b.x = snap(Math.max(0, Math.round(origX + dx)));
+        b.y = snap(Math.max(0, Math.round(origY + dy)));
         boxEl.style.left = b.x + "px";
         boxEl.style.top = b.y + "px";
         syncBoxFields();
@@ -563,6 +612,7 @@
         boxEl.releasePointerCapture(e.pointerId);
         boxEl.removeEventListener("pointermove", onMove);
         boxEl.removeEventListener("pointerup", onUp);
+        scheduleSave();
       }
       boxEl.addEventListener("pointermove", onMove);
       boxEl.addEventListener("pointerup", onUp);
@@ -571,13 +621,14 @@
     handle.addEventListener("pointerdown", function (e) {
       e.stopPropagation();
       selectBox(b.id);
+      pushHistory();
       var startX = e.clientX, startY = e.clientY;
       var origW = b.w, origH = b.h;
       handle.setPointerCapture(e.pointerId);
       function onMove(ev) {
         var dx = (ev.clientX - startX) / zoom, dy = (ev.clientY - startY) / zoom;
-        b.w = Math.max(80, Math.round(origW + dx));
-        b.h = Math.max(50, Math.round(origH + dy));
+        b.w = snap(Math.max(80, Math.round(origW + dx)));
+        b.h = snap(Math.max(50, Math.round(origH + dy)));
         boxEl.style.width = b.w + "px";
         boxEl.style.height = b.h + "px";
         syncBoxFields();
@@ -586,6 +637,7 @@
         handle.releasePointerCapture(e.pointerId);
         handle.removeEventListener("pointermove", onMove);
         handle.removeEventListener("pointerup", onUp);
+        scheduleSave();
       }
       handle.addEventListener("pointermove", onMove);
       handle.addEventListener("pointerup", onUp);
@@ -598,13 +650,14 @@
       if (node.isContentEditable) return;
       e.stopPropagation();
       selectEl(b.id, el.id);
+      pushHistory();
       var startX = e.clientX, startY = e.clientY;
       var origX = el.x, origY = el.y;
       node.setPointerCapture(e.pointerId);
       function onMove(ev) {
         var dx = (ev.clientX - startX) / zoom, dy = (ev.clientY - startY) / zoom;
-        el.x = Math.max(0, Math.min(b.w - el.w, Math.round(origX + dx)));
-        el.y = Math.max(0, Math.min(b.h - el.h, Math.round(origY + dy)));
+        el.x = snap(Math.max(0, Math.min(b.w - el.w, Math.round(origX + dx))));
+        el.y = snap(Math.max(0, Math.min(b.h - el.h, Math.round(origY + dy))));
         node.style.left = el.x + "px";
         node.style.top = el.y + "px";
         syncElFields();
@@ -613,6 +666,7 @@
         node.releasePointerCapture(e.pointerId);
         node.removeEventListener("pointermove", onMove);
         node.removeEventListener("pointerup", onUp);
+        scheduleSave();
       }
       node.addEventListener("pointermove", onMove);
       node.addEventListener("pointerup", onUp);
@@ -621,13 +675,14 @@
     elHandle.addEventListener("pointerdown", function (e) {
       e.stopPropagation();
       selectEl(b.id, el.id);
+      pushHistory();
       var startX = e.clientX, startY = e.clientY;
       var origW = el.w, origH = el.h;
       elHandle.setPointerCapture(e.pointerId);
       function onMove(ev) {
         var dx = (ev.clientX - startX) / zoom, dy = (ev.clientY - startY) / zoom;
-        el.w = Math.max(14, Math.min(b.w - el.x, Math.round(origW + dx)));
-        el.h = Math.max(14, Math.min(b.h - el.y, Math.round(origH + dy)));
+        el.w = snap(Math.max(14, Math.min(b.w - el.x, Math.round(origW + dx))));
+        el.h = snap(Math.max(14, Math.min(b.h - el.y, Math.round(origH + dy))));
         node.style.width = el.w + "px";
         node.style.height = el.h + "px";
         syncElFields();
@@ -636,6 +691,7 @@
         elHandle.releasePointerCapture(e.pointerId);
         elHandle.removeEventListener("pointermove", onMove);
         elHandle.removeEventListener("pointerup", onUp);
+        scheduleSave();
       }
       elHandle.addEventListener("pointermove", onMove);
       elHandle.addEventListener("pointerup", onUp);
@@ -759,16 +815,33 @@
       var txt = document.createElement("span");
       txt.className = "txt";
       txt.textContent = el.text || "(" + el.id + ")";
+      var dup = document.createElement("button");
+      dup.className = "mini-btn";
+      dup.textContent = "⧉";
+      dup.title = "Element duplizieren";
+      dup.addEventListener("click", function (e) {
+        e.stopPropagation();
+        pushHistory();
+        var clone = JSON.parse(JSON.stringify(el));
+        clone.id = "el_" + (elCounter++);
+        clone.x = Math.min(b.w - clone.w, clone.x + 12);
+        clone.y = Math.min(b.h - clone.h, clone.y + 12);
+        var idx = b.elements.indexOf(el);
+        b.elements.splice(idx + 1, 0, clone);
+        render();
+        selectEl(b.id, clone.id);
+      });
       var del = document.createElement("button");
       del.className = "mini-btn";
       del.textContent = "✕";
       del.title = "Element löschen";
       del.addEventListener("click", function (e) {
         e.stopPropagation();
+        pushHistory();
         b.elements = b.elements.filter(function (x) { return x.id !== el.id; });
         render();
       });
-      item.appendChild(tag); item.appendChild(txt); item.appendChild(del);
+      item.appendChild(tag); item.appendChild(txt); item.appendChild(dup); item.appendChild(del);
       item.addEventListener("click", function () { selectEl(b.id, el.id); });
       wrap.appendChild(item);
     });
@@ -802,6 +875,7 @@
     document.getElementById("addElBtn").addEventListener("click", function () {
       var b = findBox(selBoxId);
       if (!b) return;
+      pushHistory();
       var type = document.getElementById("newElType").value;
       var newEl = {
         id: "el_" + (elCounter++),
@@ -815,6 +889,19 @@
       b.elements.push(newEl);
       render();
       selectEl(b.id, newEl.id);
+    });
+
+    // A single undo step per "editing session" in a field, not per keystroke.
+    var historySessionOpen = false;
+    document.getElementById("inspector").addEventListener("focusin", function (e) {
+      if (e.target.tagName !== "INPUT" || historySessionOpen) return;
+      pushHistory();
+      historySessionOpen = true;
+    });
+    document.getElementById("inspector").addEventListener("focusout", function (e) {
+      if (e.target.tagName !== "INPUT") return;
+      historySessionOpen = false;
+      scheduleSave();
     });
 
     // Element fields
@@ -846,6 +933,7 @@
     document.getElementById("deleteElBtn").addEventListener("click", function () {
       var b = findBox(selBoxId);
       if (!b || !selElId) return;
+      pushHistory();
       b.elements = b.elements.filter(function (x) { return x.id !== selElId; });
       selElId = null;
       render();
@@ -871,9 +959,42 @@
   });
 
   document.getElementById("resetBtn").addEventListener("click", function () {
+    if (!confirm("Layout wirklich auf den Standard zurücksetzen? Das löscht auch den automatisch gespeicherten Stand und kann nicht rückgängig gemacht werden.")) return;
     state = JSON.parse(JSON.stringify(DEFAULTS));
     selBoxId = null; selElId = null;
+    undoStack.length = 0; redoStack.length = 0;
+    try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
     render();
+  });
+
+  function updateHistoryButtons() {
+    document.getElementById("undoBtn").disabled = undoStack.length === 0;
+    document.getElementById("redoBtn").disabled = redoStack.length === 0;
+  }
+
+  function undo() {
+    if (undoStack.length === 0) return;
+    redoStack.push(JSON.stringify(state));
+    state = JSON.parse(undoStack.pop());
+    selBoxId = null; selElId = null;
+    render();
+    updateHistoryButtons();
+  }
+  function redo() {
+    if (redoStack.length === 0) return;
+    undoStack.push(JSON.stringify(state));
+    state = JSON.parse(redoStack.pop());
+    selBoxId = null; selElId = null;
+    render();
+    updateHistoryButtons();
+  }
+  document.getElementById("undoBtn").addEventListener("click", undo);
+  document.getElementById("redoBtn").addEventListener("click", redo);
+
+  document.getElementById("snapBtn").addEventListener("click", function () {
+    snapEnabled = !snapEnabled;
+    this.textContent = "Raster: " + (snapEnabled ? "An" : "Aus");
+    this.classList.toggle("primary", snapEnabled);
   });
 
   function yamlEscape(s) {
@@ -935,11 +1056,46 @@
   });
 
   document.addEventListener("keydown", function (e) {
+    var active = document.activeElement;
+    var typing = active && (active.tagName === "INPUT" || active.tagName === "SELECT" || active.isContentEditable);
+
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
+      e.preventDefault();
+      if (e.shiftKey) redo(); else undo();
+      return;
+    }
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "y") {
+      e.preventDefault();
+      redo();
+      return;
+    }
+    if (typing) return;
+
     if (e.key === "Delete" || e.key === "Backspace") {
-      var active = document.activeElement;
-      if (active && (active.tagName === "INPUT" || active.tagName === "SELECT" || active.isContentEditable)) return;
       selBoxId = null; selElId = null;
       render();
+      return;
+    }
+
+    if (e.key.indexOf("Arrow") === 0) {
+      var b = selBoxId ? findBox(selBoxId) : null;
+      var el = (b && selElId) ? findEl(b, selElId) : null;
+      if (!b) return;
+      e.preventDefault();
+      var step = e.shiftKey ? (snapEnabled ? GRID * 4 : 10) : (snapEnabled ? GRID : 1);
+      var dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
+      var dy = e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
+      if (dx === 0 && dy === 0) return;
+      pushHistory();
+      if (el) {
+        el.x = Math.max(0, Math.min(b.w - el.w, el.x + dx));
+        el.y = Math.max(0, Math.min(b.h - el.h, el.y + dy));
+        selectEl(b.id, el.id);
+      } else {
+        b.x = Math.max(0, b.x + dx);
+        b.y = Math.max(0, b.y + dy);
+        selectBox(b.id);
+      }
     }
   });
 

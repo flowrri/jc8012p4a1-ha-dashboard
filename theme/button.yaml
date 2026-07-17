@@ -97,13 +97,3 @@ lvgl:
         bg_color: "0xFFFFFF"
         radius: 999
         pad_all: 6   # bigger knob -> easier to grab/drag
-
-    arc:
-      arc_width: 10
-      arc_color: "0xE4E4E8"
-      indicator:
-        arc_width: 10
-        arc_color: $accent_color
-      knob:
-        bg_color: "0xFFFFFF"
-        pad_all: 2

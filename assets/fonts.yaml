@@ -26,13 +26,7 @@ font:
     bpp: 4
     glyphsets: ["GF_Latin_Core"]
 
-  - file: "gfonts://Roboto@700"
-    id: value_font
-    size: 38
-    bpp: 4
-    glyphsets: ["GF_Latin_Core"]
-
-  # Top-left status-bar clock (bigger than value_font)
+  # Top-left status-bar clock
   - file: "gfonts://Roboto@700"
     id: clock_card_font
     size: 54

@@ -48,7 +48,6 @@ font:
       "\U000F058E",  # mdi-water-percent (humidity)
       "\U000F0F03",  # mdi-weather-sunset-down
       "\U000F0238",  # mdi-flash (energy)
-      "\U000F05A9",  # mdi-wifi
       "\U000F0A79",  # mdi-trash-can (Restmüll)
       "\U000F064E",  # mdi-recycle (Gelber Sack)
       "\U000F0313",  # mdi-leaf (Bioabfall)
@@ -103,7 +102,6 @@ substitutions:
   humidity:             "\U000F058E"
   sunset:               "\U000F0F03"
   flash:                "\U000F0238"
-  wifi:                 "\U000F05A9"
   trash_can:            "\U000F0A79"
   recycle:              "\U000F064E"
   leaf:                 "\U000F0313"
